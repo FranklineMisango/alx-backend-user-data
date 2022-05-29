@@ -1,96 +1,71 @@
 #!/usr/bin/env python3
 """
-Definition of class BasicAuth
+Defines of class SessionAuth
 """
 import base64
-from .auth import Auth
+from uuid import uuid4
 from typing import TypeVar
 
+from .auth import Auth
 from models.user import User
 
 
-class BasicAuth(Auth):
-    """ Implement Basic Authorization protocol methods
+class SessionAuth(Auth):
+    """ Implement Session Authorization protocol methods
     """
-    def extract_base64_authorization_header(self,
-                                            authorization_header: str) -> str:
-        """
-        Extracts the Base64 part of the Authorization header for a Basic
-        Authorization
-        """
-        if authorization_header is None:
-            return None
-        if not isinstance(authorization_header, str):
-            return None
-        if not authorization_header.startswith("Basic "):
-            return None
-        token = authorization_header.split(" ")[-1]
-        return token
+    user_id_by_session_id = {}
 
-    def decode_base64_authorization_header(self,
-                                           base64_authorization_header:
-                                           str) -> str:
+    def create_session(self, user_id: str = None) -> str:
         """
-        Decode a Base64-encoded string
+        Creates a Session ID for a user with id user_id
+        Args:
+            user_id (str): user's user id
+        Return:
+            None is user_id is None or not a string
+            Session ID in string format
         """
-        if base64_authorization_header is None:
+        if user_id is None or not isinstance(user_id, str):
             return None
-        if not isinstance(base64_authorization_header, str):
-            return None
-        try:
-            decoded = base64_authorization_header.encode('utf-8')
-            decoded = base64.b64decode(decoded)
-            return decoded.decode('utf-8')
-        except Exception:
-            return None
+        id = uuid4()
+        self.user_id_by_session_id[str(id)] = user_id
+        return str(id)
 
-    def extract_user_credentials(self,
-                                 decoded_base64_authorization_header:
-                                 str) -> (str, str):
+    def user_id_for_session_id(self, session_id: str = None) -> str:
         """
-        Returns user email and password from Base64 decoded value
+        Returns a user ID based on a session ID
+        Args:
+            session_id (str): session ID
+        Return:
+            user id or None if session_id is None or not a string
         """
-        if decoded_base64_authorization_header is None:
-            return (None, None)
-        if not isinstance(decoded_base64_authorization_header, str):
-            return (None, None)
-        if ':' not in decoded_base64_authorization_header:
-            return (None, None)
-        email = decoded_base64_authorization_header.split(":")[0]
-        password = decoded_base64_authorization_header[len(email) + 1:]
-        return (email, password)
+        if session_id is None or not isinstance(session_id, str):
+            return None
+        return self.user_id_by_session_id.get(session_id)
 
-    def user_object_from_credentials(self, user_email: str,
-                                     user_pwd: str) -> TypeVar('User'):
+    def current_user(self, request=None):
         """
-        Return a User instance based on email and password
+        Return a user instance based on a cookie value
+        Args:
+            request : request object containing cookie
+        Return:
+            User instance
         """
-        if user_email is None or not isinstance(user_email, str):
-            return None
-        if user_pwd is None or not isinstance(user_pwd, str):
-            return None
-        try:
-            users = User.search({"email": user_email})
-            if not users or users == []:
-                return None
-            for u in users:
-                if u.is_valid_password(user_pwd):
-                    return u
-            return None
-        except Exception:
-            return None
+        session_cookie = self.session_cookie(request)
+        user_id = self.user_id_for_session_id(session_cookie)
+        user = User.get(user_id)
+        return user
 
-    def current_user(self, request=None) -> TypeVar('User'):
+    def destroy_session(self, request=None):
         """
-        Returns a User instance based on a received request
+        Deletes a user session
         """
-        Auth_header = self.authorization_header(request)
-        if Auth_header is not None:
-            token = self.extract_base64_authorization_header(Auth_header)
-            if token is not None:
-                decoded = self.decode_base64_authorization_header(token)
-                if decoded is not None:
-                    email, pword = self.extract_user_credentials(decoded)
-                    if email is not None:
-                        return self.user_object_from_credentials(email, pword)
-        return
+        if request is None:
+            return False
+        session_cookie = self.session_cookie(request)
+        if session_cookie is None:
+            return False
+        user_id = self.user_id_for_session_id(session_cookie)
+        if user_id is None:
+            return False
+        del self.user_id_by_session_id[session_cookie]
+        return True
